@@ -1,0 +1,262 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<style>
+  body {
+    padding: 100px;
+    width: 1000px;
+    margin: auto;
+    text-align: left;
+    font-weight: 300;
+    font-family: 'Open Sans', sans-serif;
+    color: #121212;
+  }
+  h1, h2, h3, h4 {
+    font-family: 'Source Sans Pro', sans-serif;
+  }
+</style>
+<title>CS 184/284A Rasterizer</title>
+<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+<link href="https://fonts.googleapis.com/css?family=Open+Sans|Source+Sans+Pro" rel="stylesheet">
+</head>
+
+
+<body>
+
+<h1 align="middle">CS 184/284A: Computer Graphics and Imaging, Spring 2024</h1>
+<h1 align="middle">Homework 1: Rasterizer</h1>
+<h2 align="middle">Zhen Fu</h2>
+
+<br><br>
+
+<div>
+
+<h2 align="middle">Overview</h2>
+<p>In this experiment, I build up a rasterization pipeline to present the svg or png files in the screen space. I implement function <b><i>
+rasterize_triangle </i></b>to directly show the svg files, some transform functions like <b><i>translate, scale and rotate</i></b> to help transform the 
+graphs in the svg files, function <b><i>rasterize_interpolated_color_triangle</i></b> to calculate barycentric coordinates and use them to interpolate 
+vertex colors across the triangle, function <b><i>rasterize_textured_triangle</i></b> to put the texture(image) onto the shape that we want. The shape 
+is decided in the svg files by using uv coordinates. What's more, to solve antialiasing problem caused by the limited screen resolution, I implement 
+<b>pixel sampling</b> to decide what color to fill in the screen pixels according to the uv coordinates and texture, <b> level sampling</b> to 
+decide which mipmap level we use for the pixel, <b>supersampling </b> to smooth the image by averaging the color values and remove the high-frequency 
+details as well as jaggies. With this pipeline we can turn every svg file into smooth image!
+</p>
+
+<h2 align="middle">Section I: Rasterization</h2>
+
+<h3 align="middle">Part 1: Rasterizing single-color triangles</h3>
+
+<p><b>How to resterize triangles: </b>Firstly, Instead of checking every pixel in the frame_buffer, we can just check the pixels within the 
+bounding box of the triangle. Specifically, it is the rectangle with corners at (min_x, min_y), (min_x, max_y), (max_x, min_y), (max_x, max_y), 
+aligned with the coordinate axes for simplicity. Then we cross product the coordinate vector of a point with the direction vectors of 
+lines of the triangle one by one. If all three of the value have the same sign, the point is inside the triangle.</p>
+<br>
+
+<p>Here is a <b><i>png</i></b> screenshot of <b><i>basic/test4.svg</i></b> with the pixel inspector centered on jaggies of the triangles' edges.</p>
+<div align="middle">
+    <img src = "images/task1.1.png" align="middle" width="400px"/>
+    <img src = "images/task1.2.png" align="middle" width="400px"/>
+    <figcaption align="middle"><b>A lot of Jaggies</b></figcaption>
+</div>
+<br><br>
+
+
+
+<h3 align="middle">Part 2: Antialiasing triangles</h3>
+<p><b>Why is supersampling useful? </b>Aliasing occurs when high-frequency details in a picture are under-sampled, leading to jaggies.
+  What supersampling does is like filtering the image to smooth it and remove the high-frequency information inside the image by averaging 
+  the pixel values. So when high-frequency details are removed, jaggies are removed at the same time. Successfully achieved antialiasing!
+</p>
+
+<p><b>Motification I did: </b>1. Change the size of the sample_buffer to width * height * sample_rate, which is sample_rate times bigger.<br>
+  2. Change function <b><i>rasterize_triangle: </i></b>imagine now we have sample_rate times more samples inside each triangle that we have to 
+  rasterize, to check whether they are in the triangle or not, I traverse the bounding box of the triangle with a step size of 1/sample_rate 
+  pixel, instead of 1 pixel. And if the point is inside the triangle, I fill the corresponding point in the sample buffer with corresponding color.<br>
+  3. Since in function <b><i>rasterize_triangle</i></b> I choose to directly assign the color value to the sample_buffer without using 
+  function <b><i>fill_pixel</i></b>, now I have to change this <b><i>fill_pixel</i></b> function so that it can fit for function <b><i>rasterize_point </i></b>
+  and function <b><i>rasterize_line</i></b> since there are boundaries and outlines in some of the pictures which are drawn by lines rather than 
+  triangles. To be specific, as we enlarge the size of the sample_buffer, we have to fill more points in it for original single points and 
+  lines so that they can stay the same shape as it was before supersampling.<br>
+  4. After finishing rasterizing all the points and lines and triangles, which means the sample_buffer now has all the information we need 
+  to build up the image in our screen space, we can now assign color values to the frame_buffer by using function <b><i>resolve_to_framebuffer.</i></b> 
+  Count how many subpixels are there in one pixel and then assign the average color value to the corresponding point in the frame_buffer. 
+  We are done with our supersampling!
+</p>
+<div align="middle">
+  <table style="width=100%">
+    <tr>
+      <td>
+        <img src="images/task2.1.png" align="middle" width="400px"/>
+        <figcaption align="middle">Sample rate 1</figcaption>
+      </td>
+      <td>
+        <img src="images/task2.2.png" align="middle" width="400px"/>
+        <figcaption align="middle">Sample rate 4.</figcaption>
+      </td>
+      <td>
+        <img src="images/task2.3.png" align="middle" width="400px"/>
+        <figcaption align="middle">Sample rate 16</figcaption>
+      </td>
+    </tr>
+  </table>
+  <figcaption aligh="middle">As for sample rate 1, the corner of the triangle is too sharp for the screen to catch its details. So these
+    jaggies things come out and the image appears discontinuous. But with the increase of the sample_rate, supersampling helps us to blur
+    the original image as well as remove the high-frequency details. So jaggies are gone and the whole image (especially for the red and 
+    pink triangle)looks much smoother. 
+  </figcaption>
+</div>
+<br><br>
+
+
+
+<h3 align="middle">Part 3: Transforms</h3>
+<p>Here is my robot performing "robot-dancing"! It is waving its hands and swings its legs to show how happy it is!
+</p>
+<div align="middle">
+  <img src = "images/task3.1.png" align="middle" width="500px"/>
+</div>
+
+
+
+<h2 align="middle">Section II: Sampling</h2>
+
+<h3 align="middle">Part 4: Barycentric coordinates</h3>
+<p><b>Barycentric coordinates</b> is a way to describe the location of a point in relation to the triangle's 3 vertices. The distances 
+  from 3 vertices to the point can be thought of as influencing the point within the triangle, where the point's position is determined 
+  by how much it is "pulled" towards each vertex by the distance. 
+</p>
+<div align="middle">
+  <img src = "images/task4.1.png" align="middle" width="400px", height = "300px"/>
+  <figcaption align="middle"><b>A smoothly blended color triangle</b></figcaption>
+</div>
+
+<div align="middle">
+  <img src = "images/task4.2.png" align="middle" width="400px", height = "300px"/>
+  <figcaption align="middle"><b>Here is a <b><i>png</i></b> screenshot of <b><i>basic/test7.svg</i></b></b></figcaption>
+</div>
+<br><br>
+
+
+<h3 align="middle">Part 5: "Pixel sampling" for texture mapping</h3>
+<p><b>pixel sampling</b> is a way to determine the color values of pixels when rendering images or texture. <b>Texture mapping </b> is the
+  process of applying a texture (an image or pattern) onto the surface of a geometric shape (or screen space) to give it more details.
+  The problems are that the texture only has discrete pixels with rgb colors and the sizes of the texture and the surface are not the same.
+  so it's hard to match every pixel on the surface with a texture pixel that we already have. To solve this problem, we transfer the points 
+  of both the surface and the texture into uv coordinates. Now we can apply the texture to the surface like what we did in the previous 
+  tasks: rasterizing a triangle, check if certain pixel is inside the triangle, use Barycentric coordinates to get the uv coordinates of 
+  that certain pixel according to the uv coordinates of the vertices, using pixel sampling method to find the color of that pixel in surface
+  according to the color of the point in the texture with the same uv coordinates. 
+</p>
+
+<p>We have learned 2 different pixel sampling methods: <b> nearest_sampling</b> chooses one original discrete pixel from the texture that 
+  has the closest distance from the pixel we want and gives its color to that pixel. <b>bilinear_sampling</b> chooses four nearest original
+  discrete pixels from the texture in the uv coordinates and gives their average value of color to the pixel we want.   
+</p>
+
+<br><br>
+
+<div align="middle">
+  <table style="width=100%">
+    <tr>
+      <td>
+        <img src="images/task5.1.png" align="middle" width="400px"/>
+        <figcaption align="middle">nearest sampling at 1 sample per pixel</figcaption>
+      </td>
+      <td>
+        <img src="images/task5.2.png" align="middle" width="400px"/>
+        <figcaption align="middle">nearest sampling at 16 samples per pixel</figcaption>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div align="middle">
+  <table style="width=100%">
+    <tr>
+      <td>
+        <img src="images/task5.3.png" align="middle" width="400px"/>
+        <figcaption align="middle">bilinear sampling at 1 sample per pixel</figcaption>
+      </td>
+      <td>
+        <img src="images/task5.4.png" align="middle" width="400px"/>
+        <figcaption align="middle">bilinear sampling at 16 samples per pixel</figcaption>
+      </td>
+    </tr>
+  </table>
+</div>
+
+
+
+<h3 align="middle">Part 6: "Level sampling" with mipmaps for texture mapping</h3>
+<p><b>Level sampling</b> is a technique used to select the appropriate level of detail for a texture based on its appearance in the 
+  rendered scene. In other word, we have to use different resolutions of a texture depending on how it's viewed in the scene. To 
+  implement it in texture mapping, we have <b>mipmap</b>: a precomputed sequence of textures, each level being a downscaled version 
+  of the original texture. Then we can use our level sampling method to decide which mipmap level we will use.
+</p>
+
+<p>We have implemented 3 level sampling methods: <b>Zero sampling</b> always chooses level 0. <b>nearest_sampling</b> chooses the nearest
+  value of log2(L) as its level. The way we calculate L is that we first calculate the uv coordinates of the certain pixel and its adjacent
+  pixel, then we calculate the distance of the two points in uv coordinates and convert the distance to xy coordinates by multiplying it
+  with width or height of the texture. <b>Linear_sampling </b>chooses 2 nearest levels and then compute a weighted sum of using one sample 
+  from each of the adjacent mipmap levels.
+</p>
+
+<b>tradeoffs between pixel sampling, level sampling and supersampling:</b><br><br>
+<b>pixel sampling:</b><br>
+<p><b>speed: </b>Quite fast as it only involves sampling each pixel once from the texture. And nearest_sampling is faster than Linear_sampling
+  since it requires less add and multiplication.<br>
+  <b>memory usage: </b>Moderate as it only requires the original texture data. <br>
+  <b>antialiasing power: </b>Limited as it actually just samples the texture once per pixel. So it has no effect on solving antialising <br>
+</p>
+
+<b>level sampling:</b>
+<p><b>speed: </b>Fast since it improves rendering speed when textures are minified. <br>
+  <b>memory usage: </b>Higher compared to pixel sampling since it has to stor emultiple levels of the texture, each at a reduced 
+  resolution. The increase of the memory usage is approximately 33%(1/3). <br>
+  <b>antialiasing power: </b>Improved since it uses different texture levels to smooth out some details that may cause alising. <br>
+</p>
+<b>supersampling:</b>
+<p><b>speed: </b>Significantly slower as it requires sampling each pixel several times and then averaging the results to produce the 
+  final pixel colors. <br>
+  <b>memory usage: </b>A lot higher especially for sample buffer as it requires storing multiple samples for each pixel during rendering. <br>
+  <b>antialiasing power: </b>Very good as it can capture more details in the image and average it out. It's like filtering the image. <br>
+</p>
+
+<div align="middle">
+  <table style="width=100%">
+    <tr>
+      <td>
+        <img src="images/task6.1.png" align="middle" width="500px"/>
+        <figcaption align="middle">L_ZERO and P_NEAREST</figcaption>
+      </td>
+      <td>
+        <img src="images/task6.2.png" align="middle" width="500px"/>
+        <figcaption align="middle">L_ZERO and P_LINEAR</figcaption>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div align="middle">
+  <table style="width=100%">
+    <tr>
+      <td>
+        <img src="images/task6.3.png" align="middle" width="500px"/>
+        <figcaption align="middle">L_NEAREST and P_NEAREST</figcaption>
+      </td>
+      <td>
+        <img src="images/task6.4.png" align="middle" width="500px"/>
+        <figcaption align="middle">L_NEAREST and P_LINEAR</figcaption>
+      </td>
+    </tr>
+  </table>
+</div>
+<br><br>
+
+<h2 align="middle">Section III: Art Competition</h2>
+<p>If you are not participating in the optional art competition, don't worry about this section!</p>
+
+<h3 align="middle">Part 7: Draw something interesting!</h3>
+
+</body>
+</html>
